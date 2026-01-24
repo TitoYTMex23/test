@@ -19,11 +19,29 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
+var (
+	customResolver *net.Resolver
+)
+
 func main() {
 	addr := flag.String("addr", ":5301", "UDP address to listen on")
 	certFile := flag.String("cert", "", "Path to certificate file")
 	keyFile := flag.String("key", "", "Path to key file")
+	dnsServer := flag.String("dns", "", "Custom DNS server (e.g., 8.8.8.8:53)")
 	flag.Parse()
+
+	if *dnsServer != "" {
+		log.Printf("Using custom DNS resolver: %s", *dnsServer)
+		customResolver = &net.Resolver{
+			PreferGo: true,
+			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+				d := net.Dialer{
+					Timeout: 10 * time.Second,
+				}
+				return d.DialContext(ctx, "udp", *dnsServer)
+			},
+		}
+	}
 
 	tlsConf, err := generateTLSConfig(*certFile, *keyFile)
 	if err != nil {
@@ -31,7 +49,7 @@ func main() {
 	}
 
 	listener, err := quic.ListenAddr(*addr, tlsConf, &quic.Config{
-		MaxIdleTimeout: 30 * time.Second,
+		MaxIdleTimeout:  30 * time.Second,
 		KeepAlivePeriod: 10 * time.Second,
 	})
 	if err != nil {
@@ -80,7 +98,13 @@ func handleStream(stream *quic.Stream) {
 	target := fmt.Sprintf("%s:%d", targetAddr, targetPort)
 	log.Printf("Connecting to %s", target)
 
-	targetConn, err := net.DialTimeout("tcp", target, 10*time.Second)
+	var targetConn net.Conn
+	dialer := net.Dialer{
+		Timeout:  10 * time.Second,
+		Resolver: customResolver,
+	}
+
+	targetConn, err = dialer.Dial("tcp", target)
 	if err != nil {
 		log.Printf("Failed to dial %s: %v", target, err)
 		return
