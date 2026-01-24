@@ -18,7 +18,7 @@ import (
 type TunnelClient struct {
 	serverAddr string
 	tlsConf    *tls.Config
-	sess       *quic.Conn
+	sess       quic.Connection
 	mutex      sync.Mutex
 }
 
@@ -29,7 +29,7 @@ func NewTunnelClient(serverAddr string, tlsConf *tls.Config) *TunnelClient {
 	}
 }
 
-func (c *TunnelClient) GetStream() (*quic.Stream, error) {
+func (c *TunnelClient) GetStream() (quic.Stream, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
@@ -67,7 +67,7 @@ func (c *TunnelClient) dial() error {
 
 func main() {
 	localAddr := flag.String("listen", ":1080", "Local SOCKS5 address")
-	serverAddr := flag.String("server", "127.0.0.1:5301", "Remote QUIC server address")
+	serverAddr := flag.String("server", "127.0.0.1:53", "Remote QUIC server address")
 	flag.Parse()
 
 	// TLS Config - Insecure for now as we use self-signed mostly.

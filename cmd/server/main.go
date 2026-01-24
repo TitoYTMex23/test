@@ -24,7 +24,7 @@ var (
 )
 
 func main() {
-	addr := flag.String("addr", ":5301", "UDP address to listen on")
+	addr := flag.String("addr", ":53", "UDP address to listen on")
 	certFile := flag.String("cert", "", "Path to certificate file")
 	keyFile := flag.String("key", "", "Path to key file")
 	dnsServer := flag.String("dns", "", "Custom DNS server (e.g., 8.8.8.8:53)")
@@ -67,7 +67,7 @@ func main() {
 	}
 }
 
-func handleConnection(conn *quic.Conn) {
+func handleConnection(conn quic.Connection) {
 	defer conn.CloseWithError(0, "closed")
 	log.Printf("New connection from %s", conn.RemoteAddr())
 
@@ -81,7 +81,7 @@ func handleConnection(conn *quic.Conn) {
 	}
 }
 
-func handleStream(stream *quic.Stream) {
+func handleStream(stream quic.Stream) {
 	defer stream.Close()
 
 	cmd, targetAddr, targetPort, err := protocol.ReadRequest(stream)

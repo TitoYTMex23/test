@@ -105,6 +105,10 @@ install_go_server() {
         echo "export PATH=\$PATH:/usr/local/go/bin" >> ~/.bashrc
     fi
 
+    # Instalar dependencias del sistema (net-tools para netstat)
+    show_progress "Instalando net-tools"
+    apt-get install -y net-tools
+
     # Crear directorios
     mkdir -p "$WORK_DIR/cmd/server" "$WORK_DIR/pkg/protocol"
 
@@ -117,7 +121,7 @@ module github.com/jules/quic-tunnel
 go 1.23
 
 require (
-	github.com/quic-go/quic-go v0.59.0
+	github.com/quic-go/quic-go v0.48.2
 	golang.org/x/net v0.33.0
 )
 EOF
@@ -273,7 +277,7 @@ func main() {
 	}
 }
 
-func handleConnection(conn *quic.Conn) {
+func handleConnection(conn quic.Connection) {
 	defer conn.CloseWithError(0, "closed")
 	log.Printf("New connection from %s", conn.RemoteAddr())
 
@@ -287,7 +291,7 @@ func handleConnection(conn *quic.Conn) {
 	}
 }
 
-func handleStream(stream *quic.Stream) {
+func handleStream(stream quic.Stream) {
 	defer stream.Close()
 
 	cmd, targetAddr, targetPort, err := protocol.ReadRequest(stream)
