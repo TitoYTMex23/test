@@ -66,25 +66,41 @@ func (c *TunnelClient) dial() error {
 }
 
 func main() {
-	localAddr := flag.String("listen", ":1080", "Local SOCKS5 address")
-	serverAddr := flag.String("server", "127.0.0.1:53", "Remote QUIC server address")
+	localAddr := flag.String("listen", ":8080", "Local SOCKS5 address")
+	serverAddr := flag.String("server", "", "Remote QUIC server address (e.g., 1.2.3.4:53)")
+	resolverAddr := flag.String("resolver", "", "Alias for -server")
+	domain := flag.String("domain", "", "SNI Domain for TLS handshake (e.g., example.com)")
+
+	// Flags for compatibility/unused but present in some scripts
+	_ = flag.String("tcp-listen-port", "", "Ignored (compatibility)")
+	_ = flag.Int("keep-alive-interval", 0, "Ignored (compatibility)")
+
 	flag.Parse()
 
-	// TLS Config - Insecure for now as we use self-signed mostly.
-	// TODO: Add CA loading if needed.
-	tlsConf := &tls.Config{
-		InsecureSkipVerify: true,
-		NextProtos:         []string{"quic-tunnel"},
+	targetServer := *serverAddr
+	if targetServer == "" {
+		targetServer = *resolverAddr
+	}
+	if targetServer == "" {
+		targetServer = "127.0.0.1:53"
+		log.Println("No server specified, using default: 127.0.0.1:53")
 	}
 
-	client := NewTunnelClient(*serverAddr, tlsConf)
+	// TLS Config
+	tlsConf := &tls.Config{
+		InsecureSkipVerify: true, // Self-signed usually
+		NextProtos:         []string{"quic-tunnel"},
+		ServerName:         *domain, // SNI is crucial for obfuscation
+	}
+
+	client := NewTunnelClient(targetServer, tlsConf)
 
 	listener, err := net.Listen("tcp", *localAddr)
 	if err != nil {
 		log.Fatalf("Failed to listen on %s: %v", *localAddr, err)
 	}
 	log.Printf("SOCKS5 listening on %s", *localAddr)
-	log.Printf("Forwarding to %s", *serverAddr)
+	log.Printf("Forwarding to %s (SNI: %s)", targetServer, *domain)
 
 	for {
 		conn, err := listener.Accept()
@@ -100,7 +116,6 @@ func handleSocks5(conn net.Conn, client *TunnelClient) {
 	defer conn.Close()
 
 	// SOCKS5 Negotiation
-	// 1. Read Version + NMethods
 	buf := make([]byte, 2)
 	if _, err := io.ReadFull(conn, buf); err != nil {
 		return
@@ -110,32 +125,24 @@ func handleSocks5(conn net.Conn, client *TunnelClient) {
 		return // Only SOCKS5
 	}
 
-	// 2. Read Methods
 	methods := make([]byte, nMethods)
 	if _, err := io.ReadFull(conn, methods); err != nil {
 		return
 	}
 
-	// 3. Reply: No Auth (0x00)
+	// Reply: No Auth (0x00)
 	if _, err := conn.Write([]byte{0x05, 0x00}); err != nil {
 		return
 	}
 
-	// 4. Read Request
-	// [VER][CMD][RSV][ATYP][DST.ADDR][DST.PORT]
-	// We need to parse this to reconstruct it or send it efficiently.
-	// Actually, our protocol needs (Addr, Port).
-	// So we must parse it.
-
+	// Read Request
 	header := make([]byte, 4)
 	if _, err := io.ReadFull(conn, header); err != nil {
 		return
 	}
-	// cmd := header[1]
 	atyp := header[3]
 
 	if header[1] != 0x01 { // CMD must be CONNECT
-		// Reply Command not supported
 		conn.Write([]byte{0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
 		return
 	}
@@ -168,7 +175,6 @@ func handleSocks5(conn net.Conn, client *TunnelClient) {
 		}
 		addr = net.IP(bufIP).String()
 	default:
-		// Address type not supported
 		conn.Write([]byte{0x05, 0x08, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
 		return
 	}
@@ -179,12 +185,10 @@ func handleSocks5(conn net.Conn, client *TunnelClient) {
 	}
 	destPort = binary.BigEndian.Uint16(bufPort)
 
-	// Now we have addr and destPort.
-	// Open Stream to Server.
+	// Open Stream to Server
 	stream, err := client.GetStream()
 	if err != nil {
 		log.Printf("Failed to get stream: %v", err)
-		// Reply Server Failure
 		conn.Write([]byte{0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
 		return
 	}
@@ -196,10 +200,7 @@ func handleSocks5(conn net.Conn, client *TunnelClient) {
 		return
 	}
 
-	// Assuming Server is ready to pipe if WriteRequest succeeded (mostly).
-	// Reply SOCKS5 Success to Client
-	// [VER][REP][RSV][ATYP][BND.ADDR][BND.PORT]
-	// We just send 0.0.0.0:0 as bound addr
+	// Reply SOCKS5 Success
 	if _, err := conn.Write([]byte{0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0}); err != nil {
 		return
 	}

@@ -28,7 +28,26 @@ func main() {
 	certFile := flag.String("cert", "", "Path to certificate file")
 	keyFile := flag.String("key", "", "Path to key file")
 	dnsServer := flag.String("dns", "", "Custom DNS server (e.g., 8.8.8.8:53)")
+
+	// Compatibility flags for panel scripts
+	targetAddrIgnored := flag.String("target-address", "", "Target address (Ignored in SOCKS mode)")
+	dnsListenPort := flag.String("dns-listen-port", "", "Alias for -addr port")
+	domain := flag.String("domain", "", "Domain for SNI (informational)")
+
 	flag.Parse()
+
+	// Handle aliases
+	listenAddr := *addr
+	if *dnsListenPort != "" {
+		listenAddr = ":" + *dnsListenPort
+	}
+
+	if *targetAddrIgnored != "" {
+		log.Printf("Starting in SOCKS5 Dynamic Mode (ignoring fixed target: %s)", *targetAddrIgnored)
+	}
+	if *domain != "" {
+		log.Printf("Serving for domain: %s", *domain)
+	}
 
 	if *dnsServer != "" {
 		log.Printf("Using custom DNS resolver: %s", *dnsServer)
@@ -48,14 +67,14 @@ func main() {
 		log.Fatalf("Failed to setup TLS: %v", err)
 	}
 
-	listener, err := quic.ListenAddr(*addr, tlsConf, &quic.Config{
+	listener, err := quic.ListenAddr(listenAddr, tlsConf, &quic.Config{
 		MaxIdleTimeout:  30 * time.Second,
 		KeepAlivePeriod: 10 * time.Second,
 	})
 	if err != nil {
 		log.Fatalf("Failed to listen: %v", err)
 	}
-	log.Printf("Server listening on %s (UDP)", *addr)
+	log.Printf("Server listening on %s (UDP)", listenAddr)
 
 	for {
 		conn, err := listener.Accept(context.Background())
@@ -110,22 +129,6 @@ func handleStream(stream quic.Stream) {
 		return
 	}
 	defer targetConn.Close()
-
-	// Signal success (optional? The protocol is one-way request currently)
-	// If I want to be robust, I should send a status byte back.
-	// But `protocol.ReadRequest` didn't specify a response.
-	// In SOCKS5, the server sends a reply.
-	// Let's assume the client starts sending data immediately, or waits for data.
-	// SOCKS5 expects a reply.
-	// My client implementation will need to handle this.
-	// Let's add a simple OK byte or similar?
-	// The standard `WriteRequest` didn't imply a response.
-	// Let's stick to: Request -> Connection established -> Pipe.
-	// If the client expects SOCKS5 behavior, the CLIENT APP (on phone) expects SOCKS5.
-	// The CLIENT (Termux) terminates SOCKS5.
-	// Between Client(Termux) and Server(Go), it's my protocol.
-	// So, if I dial successfully, I can just start piping.
-	// But if I fail, I should close the stream.
 
 	// Bidirectional copy
 	go func() {
