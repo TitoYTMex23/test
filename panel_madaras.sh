@@ -371,7 +371,11 @@ EOF
     /usr/local/go/bin/go build -o "$BIN_NAME" cmd/server/main.go
 
     # Instalación
+    show_progress "Deteniendo servicios conflictivos"
     systemctl stop slipstream 2>/dev/null
+    fuser -k 53/udp 2>/dev/null
+    fuser -k 53/tcp 2>/dev/null
+
     cp "$BIN_NAME" "$BIN_PATH"
     chmod +x "$BIN_PATH"
 
@@ -413,6 +417,64 @@ EOF
     draw_box "INSTALACIÓN COMPLETADA - PUERTO 53 UDP"
     echo -e "${GREEN}El motor Go está corriendo.${RESET}"
     read -p "Presiona Enter para continuar..."
+}
+
+install_manual_binary() {
+    show_banner
+    draw_header "INSTALACIÓN MANUAL (BINARIO LOCAL)" $YELLOW
+
+    LOCAL_BIN="./server-linux-amd64"
+    if [ ! -f "$LOCAL_BIN" ]; then
+        echo -e "${RED}Error: No encuentro el archivo '$LOCAL_BIN' en la carpeta actual.${RESET}"
+        read -p "Presiona Enter..."
+        return
+    fi
+
+    show_progress "Deteniendo servicios conflictivos"
+    systemctl stop slipstream 2>/dev/null
+    systemctl disable systemd-resolved 2>/dev/null
+    systemctl stop systemd-resolved 2>/dev/null
+    fuser -k 53/udp 2>/dev/null
+
+    # Restaurar DNS del VPS (Crucial porque matamos systemd-resolved)
+    rm -f /etc/resolv.conf
+    echo "nameserver 1.1.1.1" > /etc/resolv.conf
+    echo "nameserver 8.8.8.8" >> /etc/resolv.conf
+
+    show_progress "Instalando Binario"
+    cp "$LOCAL_BIN" "$BIN_PATH"
+    chmod +x "$BIN_PATH"
+
+    mkdir -p "$CERT_DIR"
+    if [ ! -f "$CERT_DIR/fullchain.pem" ]; then
+        openssl req -x509 -newkey rsa:4096 -keyout "$CERT_DIR/privkey.pem" -out "$CERT_DIR/fullchain.pem" -days 3650 -nodes -subj "/CN=madaras.work.gd" >/dev/null 2>&1
+    fi
+
+    show_progress "Creando Servicio SystemD"
+    cat > $SERVICE_FILE <<EOF
+[Unit]
+Description=Madaras Go QUIC Engine
+After=network.target
+
+[Service]
+Type=simple
+User=root
+LimitNOFILE=1048576
+ExecStart=$BIN_PATH -addr :53 -cert $CERT_DIR/fullchain.pem -key $CERT_DIR/privkey.pem
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable slipstream
+    systemctl start slipstream
+
+    draw_box "INSTALACIÓN MANUAL COMPLETADA"
+    echo -e "${GREEN}Servicio activo usando tu binario local.${RESET}"
+    read -p "Enter..."
 }
 
 # ===================== GESTIÓN DE USUARIOS =====================
@@ -482,6 +544,7 @@ while true; do
     echo -e "${CYAN}║${WHITE}   [4]${YELLOW} Ver Usuarios                                        ${CYAN}║${RESET}"
     echo -e "${CYAN}║${WHITE}   [5]${YELLOW} Auto Fix & Tune (BBR)                               ${CYAN}║${RESET}"
     echo -e "${CYAN}║${WHITE}   [6]${YELLOW} Monitor en Tiempo Real                              ${CYAN}║${RESET}"
+    echo -e "${CYAN}║${WHITE}   [8]${YELLOW} Instalación Manual (Binario Local)                  ${CYAN}║${RESET}"
     echo -e "${CYAN}║${WHITE}   [0]${YELLOW} Salir                                               ${CYAN}║${RESET}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${RESET}"
     read -p "Opción: " op
@@ -493,6 +556,7 @@ while true; do
         4) list_users ;;
         5) auto_fix ;;
         6) monitor_quic ;;
+        8) install_manual_binary ;;
         0) exit 0 ;;
     esac
 done
