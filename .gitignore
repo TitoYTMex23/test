@@ -1,0 +1,9 @@
+.gradle/
+build/
+app/build/
+app/.idea/
+app/.kotlin/
+*.log
+*.zip
+*.aar
+app/libs/
