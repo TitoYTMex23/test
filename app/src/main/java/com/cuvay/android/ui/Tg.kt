@@ -231,7 +231,7 @@ object Tg {
             is TdApi.UpdateMessageSendFailed -> jobs.firstOrNull { it.tempId == o.oldMessageId }?.let {
                 jobs.remove(it); it.emit(FwdState(FwdStep.ERROR, tgFriendly(TgError(o.error.code, o.error.message))))
             }
-                        is TdApi.UpdateNewMessage -> { botReply(o.message); if (o.message.chatId == currentChatId) _messagesFlow.value = listOf(o.message) + _messagesFlow.value }
+                        is TdApi.UpdateNewMessage -> { botReply(o.message); if (o.message.chatId == currentChatId) _messagesFlow.value = (listOf(o.message) + _messagesFlow.value).take(100) }
             is TdApi.UpdateMessageContent -> { botEdit(o.chatId, o.messageId, o.newContent) }
             is TdApi.UpdateFile -> {
                 main.post {
@@ -295,8 +295,12 @@ object Tg {
 
     private fun botReply(m: TdApi.Message) {
         if (m.isOutgoing) return
-        val to = (m.replyTo as? TdApi.MessageReplyToMessage)?.messageId ?: return
-        val j = jobs.firstOrNull { it.botChatId == m.chatId && it.sentId != 0L && it.sentId == to } ?: return
+        val to = (m.replyTo as? TdApi.MessageReplyToMessage)?.messageId
+        val j = if (to != null) {
+            jobs.firstOrNull { it.botChatId == m.chatId && it.sentId != 0L && it.sentId == to }
+        } else {
+            jobs.lastOrNull { it.botChatId == m.chatId }
+        } ?: return
         j.botMsgId = m.id
         classify(j, textOf(m.content))
     }
@@ -335,7 +339,7 @@ object Tg {
             ui(FwdState(FwdStep.PREPARING, "Preparando reenvío…"))
             val src = call(TdApi.SearchPublicChat(channel.trimStart('@')))
             val dst = call(TdApi.SearchPublicChat(bot.trimStart('@')))
-            val id = tgMsgId shl 20                    // TDLib numera los mensajes de canal como id de servidor << 20
+            val id = if (tgMsgId > 1000000000L) tgMsgId else (tgMsgId shl 20)
             val m = call(TdApi.GetMessage(src.id, id))
             if (m.content is TdApi.MessageText) throw TgError(0, "Esa publicación no tiene archivo")
             val p = call(TdApi.GetMessageProperties(src.id, id))

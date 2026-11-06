@@ -76,7 +76,7 @@ import kotlin.math.*
 import kotlin.random.Random
 
 // ---- IA real (Gemini via tu servidor cuvi-ai). El mismo valor que CUVI_APP_TOKEN en /etc/cuvi-ai.env ----
-internal const val AI_TOKEN = "eb92fbf02a29e267057b381021fd743777add8bd74d6a8fb"
+
 
 private data class AiMsg(val mine: Boolean, val text: String)
 
@@ -89,7 +89,7 @@ private fun askCuvi(ctx: Context, q: String, screen: String, hist: List<AiMsg>):
     try {
         c.requestMethod = "POST"; c.connectTimeout = 8000; c.readTimeout = 45000; c.doOutput = true
         c.setRequestProperty("Content-Type", "application/json")
-        c.setRequestProperty("X-Cuvi-Token", AI_TOKEN)
+        c.setRequestProperty("X-Cuvi-Token", com.cuvay.android.BuildConfig.AI_TOKEN)
         c.setRequestProperty("X-Device", deviceId(ctx))
         c.outputStream.use { it.write(body.toByteArray()) }
         if (c.responseCode != 200) error("http ${c.responseCode}")

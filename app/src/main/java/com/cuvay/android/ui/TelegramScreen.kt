@@ -23,6 +23,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import org.drinkless.tdlib.TdApi
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -142,12 +144,13 @@ fun PasswordInputView() {
 
 @Composable
 fun ErrorView(error: String) {
+    val context = LocalContext.current
     Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.Center) {
         Text("Error", color = Color.Red, fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(16.dp))
         Text(error, color = Color.White)
         Spacer(modifier = Modifier.height(16.dp))
-        Button(onClick = { val ctx = Tg.start(null as android.content.Context) }) {
+        Button(onClick = { Tg.start(context) }) {
             Text("Reintentar")
         }
     }
@@ -278,7 +281,7 @@ fun ChatView(chatId: Long, onInfoClick: () -> Unit) {
 
         LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth(), reverseLayout = true) {
             items(messages) { message ->
-                MessageItem(message)
+                MessageItem(message, chat)
             }
         }
 
@@ -334,13 +337,15 @@ fun ChatInfoView(chatId: Long, onBack: () -> Unit) {
 }
 
 @Composable
-fun MessageItem(message: TdApi.Message) {
+fun MessageItem(message: TdApi.Message, chat: TdApi.Chat?) {
     val isOutgoing = message.isOutgoing
     val alignment = if (isOutgoing) Alignment.CenterEnd else Alignment.CenterStart
     val bgColor = if (isOutgoing) Color(0xFF2B5278) else Color(0xFF2A2A2A)
+    val coroutineScope = rememberCoroutineScope()
+    var fwdState by remember { mutableStateOf<FwdState?>(null) }
 
     Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), contentAlignment = alignment) {
-        Box(modifier = Modifier.background(bgColor, shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)).padding(12.dp)) {
+        Column(modifier = Modifier.background(bgColor, shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)).padding(12.dp)) {
             val content = message.content
             when (content) {
                 is TdApi.MessageText -> Text(content.text.text, color = Color.White)
@@ -350,11 +355,14 @@ fun MessageItem(message: TdApi.Message) {
                     if (fileId != null) {
                         val file = Tg.downloadedFiles.find { it.id == fileId } ?: photoSize.photo
                         if (file.local.isDownloadingCompleted) {
-                            val bitmap = BitmapFactory.decodeFile(file.local.path)
+                            var bitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+                            LaunchedEffect(file.local.path) {
+                                bitmap = withContext(Dispatchers.IO) { BitmapFactory.decodeFile(file.local.path) }
+                            }
                             if (bitmap != null) {
-                                Image(bitmap = bitmap.asImageBitmap(), contentDescription = "Foto", modifier = Modifier.size(200.dp))
+                                Image(bitmap = bitmap!!.asImageBitmap(), contentDescription = "Foto", modifier = Modifier.size(200.dp))
                             } else {
-                                MediaCard("Error foto", Icons.Default.Info)
+                                MediaCard("Cargando foto...", Icons.Default.Info)
                             }
                         } else {
                             val coroutineScope = rememberCoroutineScope()
@@ -388,6 +396,20 @@ fun MessageItem(message: TdApi.Message) {
                     }
                 }
                 else -> Text("[Mensaje no soportado]", color = Color.Gray, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+            }
+
+            if (chat != null && chat.type !is TdApi.ChatTypePrivate) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(onClick = {
+                    val channelName = chat.title // We use title as a fallback if it's not a public username
+                    // To get real username, we'd need Supergroup info, but title works for search if it's public
+                    coroutineScope.launch { Tg.forward(channelName, message.id, "Cuv_ai") { fwdState = it } }
+                }) {
+                    Text("Enviar a @Cuv_ai")
+                }
+                if (fwdState != null) {
+                    Text(fwdState!!.text, color = Color.Yellow, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                }
             }
         }
     }

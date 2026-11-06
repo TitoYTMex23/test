@@ -58,6 +58,7 @@ android {
     }
 
     buildTypes {
+        all { buildConfigField 'String', 'AI_TOKEN', '"placeholder"' }
         release {
             minifyEnabled false
             if (System.getenv("KEYSTORE_FILE")) {
